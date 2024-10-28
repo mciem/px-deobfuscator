@@ -34,7 +34,7 @@ To get the best performance, use the `--release` flag when building.
 
 ---
 
-### How to use
+### 🤷 How to use
 
 - Build project:
 ```bash
