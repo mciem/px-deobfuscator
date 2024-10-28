@@ -1,9 +1,6 @@
 <div align="center">
   <h1 align="center">PerimeterX Deobfuscator</h1>
   <p align="center">
-    PerimeterX Deobfuscator
-    <br />
-    <br />
     <a href="https://github.com/mciem/px-deobfuscator#-changelog">📜 ChangeLog</a>
     ·
     <a href="https://github.com/mciem/px-deobfuscator/issues">⚠️ Report Bug</a>
