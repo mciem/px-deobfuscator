@@ -1,0 +1,23 @@
+[package]
+name = "px-deobfuscator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+oxc_allocator = "0.34.0"
+oxc_ast = "0.34.0"
+oxc_codegen = "0.34.0"
+oxc_parser = "0.34.0"
+oxc_semantic = "0.34.0"
+oxc_span = "0.34.0"
+oxc_syntax = "0.34.0"
+rustc-hash = "2.0.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+panic = "abort"
+incremental = true
+debug = "none"
+strip = "symbols"
