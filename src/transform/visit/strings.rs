@@ -130,6 +130,8 @@ impl<'a> VisitMut<'a> for StringsVisitor<'a> {
                         indices_to_remove.push(i);
                     }
                 }
+
+                i += 1;
             }
 
             if !ints.is_empty() || !objects.is_empty() {
