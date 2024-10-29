@@ -11,6 +11,7 @@ pub struct StringsVisitor<'a> {
     ast: AstBuilder<'a>,
 
     functions: FxHashMap<String, Function>,
+    anon_function_counter: usize,
     proxies: FxHashMap<String, String>,
 
     values: FxHashMap<String, Values>,
@@ -22,6 +23,7 @@ impl<'a> StringsVisitor<'a> {
         Self {
             ast: AstBuilder::new(allocator),
             functions,
+            anon_function_counter: 0,
             proxies: FxHashMap::default(),
             values: FxHashMap::default(),
             current_function: None,
@@ -31,79 +33,119 @@ impl<'a> StringsVisitor<'a> {
 
 impl<'a> VisitMut<'a> for StringsVisitor<'a> {
     fn visit_function(&mut self, it: &mut oxc_ast::ast::Function<'a>, _: oxc_semantic::ScopeFlags) {
+        let name = if let Some(id) = &it.id {
+            id.name.to_string()
+        } else {
+            // Anonymous function handling
+            let anon_name = format!("anon_function_{}", self.anon_function_counter);
+            self.anon_function_counter += 1;
+            anon_name
+        };
+
         let previous_function = self.current_function.take();
-        if let Some(id) = &it.id {
-            self.current_function = Some(id.name.to_string());
-        }
+        self.current_function = Some(name.to_string());
 
-        if let Some(id) = &it.id {
-            let name = id.name.to_string();
-            if let Some(body) = &mut it.body {
-                let mut values: FxHashMap<String, i64> = FxHashMap::default();
-                let mut function = Function::default();
-                let mut function_name = String::new();
+        if let Some(body) = &mut it.body {
+            let mut ints: FxHashMap<String, i64> = FxHashMap::default();
+            let mut objects: FxHashMap<String, FxHashMap<String, i64>> = FxHashMap::default();
 
-                for stmt in &body.statements {
-                    match stmt {
-                        Statement::VariableDeclaration(var_decl) => {
-                            for decl in &var_decl.declarations {
-                                if let Some(init) = &decl.init {
-                                    match init {
-                                        Expression::NumericLiteral(lit) => {
-                                            if let BindingPatternKind::BindingIdentifier(
-                                                binding_ident,
-                                            ) = &decl.id.kind
-                                            {
-                                                values.insert(
-                                                    binding_ident.name.to_string(),
-                                                    lit.value as i64,
-                                                );
-                                            }
-                                        }
+            let mut function = Function::default();
+            let mut function_name = String::new();
 
-                                        Expression::Identifier(ident) => {
-                                            if let BindingPatternKind::BindingIdentifier(
-                                                binding_ident,
-                                            ) = &decl.id.kind
-                                            {
-                                                function_name = binding_ident.name.to_string();
-                                            }
+            let mut indices_to_remove = Vec::new();
+            let mut i = 0;
+            for stmt in &body.statements {
+                let mut remove = true;
 
-                                            if let Some(proxy) =
-                                                self.proxies.get(ident.name.as_str())
-                                            {
-                                                if let Some(func) = self.functions.get(proxy) {
-                                                    function = func.clone();
-                                                }
-                                            } else {
-                                                if let Some(func) =
-                                                    self.functions.get(ident.name.as_str())
-                                                {
-                                                    function = func.clone();
-                                                }
-                                            }
-                                        }
-
-                                        _ => {}
+                if let Statement::VariableDeclaration(var_decl) = stmt {
+                    for decl in var_decl.declarations.iter() {
+                        if let Some(init) = &decl.init {
+                            match init {
+                                Expression::NumericLiteral(lit) => {
+                                    if let BindingPatternKind::BindingIdentifier(binding_ident) =
+                                        &decl.id.kind
+                                    {
+                                        ints.insert(
+                                            binding_ident.name.to_string(),
+                                            lit.value as i64,
+                                        );
                                     }
+                                }
+                                Expression::ObjectExpression(obj) => {
+                                    let mut properties: FxHashMap<String, i64> =
+                                        FxHashMap::default();
+
+                                    for prop in &obj.properties {
+                                        if let ObjectPropertyKind::ObjectProperty(obj_prop) = prop {
+                                            if let PropertyKey::StaticIdentifier(ident) =
+                                                &obj_prop.key
+                                            {
+                                                if let Expression::NumericLiteral(lit) =
+                                                    &obj_prop.value
+                                                {
+                                                    properties.insert(
+                                                        ident.name.to_string(),
+                                                        lit.value as i64,
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if !properties.is_empty() {
+                                        if let BindingPatternKind::BindingIdentifier(
+                                            binding_ident,
+                                        ) = &decl.id.kind
+                                        {
+                                            objects
+                                                .insert(binding_ident.name.to_string(), properties);
+                                        }
+                                    }
+                                }
+                                Expression::Identifier(ident) => {
+                                    if let BindingPatternKind::BindingIdentifier(binding_ident) =
+                                        &decl.id.kind
+                                    {
+                                        function_name = binding_ident.name.to_string();
+                                    }
+
+                                    if let Some(proxy) = self.proxies.get(ident.name.as_str()) {
+                                        if let Some(func) = self.functions.get(proxy) {
+                                            function = func.clone();
+                                        }
+                                    } else if let Some(func) =
+                                        self.functions.get(ident.name.as_str())
+                                    {
+                                        function = func.clone();
+                                    }
+                                }
+                                _ => {
+                                    remove = false;
                                 }
                             }
                         }
+                    }
 
-                        _ => {}
+                    if remove {
+                        indices_to_remove.push(i);
                     }
                 }
+            }
 
-                if !values.is_empty() {
-                    self.values.insert(
-                        name.to_string(),
-                        Values {
-                            ints: values,
-                            function,
-                            function_name,
-                        },
-                    );
-                }
+            if !ints.is_empty() || !objects.is_empty() {
+                self.values.insert(
+                    name.to_string(),
+                    Values {
+                        objects,
+                        ints,
+                        function,
+                        function_name,
+                    },
+                );
+            }
+
+            for i in indices_to_remove.iter().rev() {
+                body.statements.remove(*i);
             }
         }
 
@@ -156,6 +198,35 @@ impl<'a> VisitMut<'a> for StringsVisitor<'a> {
                                         }
                                     }
 
+                                    Argument::StaticMemberExpression(member_expr) => {
+                                        if let Expression::Identifier(ident_2) = &member_expr.object
+                                        {
+                                            if let Some(value) =
+                                                values.objects.get(ident_2.name.as_str())
+                                            {
+                                                if let Some(int) =
+                                                    value.get(member_expr.property.name.as_str())
+                                                {
+                                                    let index =
+                                                        *int as usize - values.function.offset;
+                                                    if index < values.function.list.len() {
+                                                        *it = Expression::StringLiteral(
+                                                            self.ast.alloc(StringLiteral {
+                                                                span: SPAN,
+                                                                value: self.ast.atom(
+                                                                    values.function.list[index]
+                                                                        .as_str(),
+                                                                ),
+                                                            }),
+                                                        );
+
+                                                        return;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     _ => {}
                                 }
                             }
@@ -178,6 +249,8 @@ impl<'a> VisitMut<'a> for StringsVisitor<'a> {
                         if ident.name.len() == 2 && binding_ident.name.len() == 2 {
                             self.proxies
                                 .insert(binding_ident.name.to_string(), ident.name.to_string());
+
+                            it.init = None;
                         }
                     }
                 }
