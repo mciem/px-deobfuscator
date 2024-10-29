@@ -147,7 +147,7 @@ impl<'a> VisitMut<'a> for StringsVisitor<'a> {
             }
 
             for i in indices_to_remove.iter().rev() {
-                body.statements.remove(*i);
+                //body.statements.remove(*i);
             }
         }
 
